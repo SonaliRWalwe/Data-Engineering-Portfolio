@@ -1,0 +1,73 @@
+SELECT * FROM employees
+
+
+SELECT * FROM employees
+WHERE department = 'Sports'
+
+
+SELECT SUM(salary) as total_salary,department 
+FROM employees
+GROUP BY department
+
+
+SELECT count(*) as total_employee,department 
+FROM employees
+GROUP BY department
+HAVING COUNT(*) > 50
+
+
+SELECT SUM(salary) as total_salary,department FROM employees
+GROUP BY department
+ORDER BY total_salary desc
+
+
+SELECT first_name,department,salary from employees
+ORDER BY first_name
+LIMIT 5
+
+
+SELECT 
+date_part('year',hire_date) as year,
+date_part('month',hire_date) as month,
+date_part('day',hire_date) as day,
+date_part('dow',hire_date) as dayofweek,
+to_char(hire_date, 'Dy') as day_name,
+to_char(hire_date,'Month') as month_name,
+hire_date
+FROM employees
+
+
+SELECT * FROM employees e
+INNER JOIN departments d
+ON e.department = d.department
+
+
+SELECT first_name,department,salary,(SELECT max(salary) FROM employees)
+FROM employees
+
+
+SELECT first_name,salary,department,round((SELECT AVG(salary) 
+    FROM employees e2
+    WHERE e1.department = e2.department
+    GROUP BY department )) as avg_salary_by_department
+FROM employees e1 
+WHERE salary > (SELECT AVG(salary) 
+    FROM employees e2
+    WHERE e1.department = e2.department
+    GROUP BY department )
+ORDER BY salary
+
+
+SELECT first_name,salary,(SELECT ROUND(AVG(salary)) FROM employees) as average_salary,
+(CASE WHEN salary > (SELECT AVG(salary) FROM employees) THEN 'higher_than_average'
+ELSE 'lower_than_average' END) as Salary_Case
+FROM employees
+
+
+SELECT first_name,salary,department,
+ROUND(AVG(salary) OVER(PARTITION BY department)) as avg_sales_by_dept
+FROM employees
+ORDER BY salary DESC
+
+SELECT first_name,salary,RANK() OVER(ORDER BY salary DESC)
+FROM employees
