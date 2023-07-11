@@ -1,0 +1,296 @@
+##### dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+
+
+# Library for import database data format
+import sqlite3 as db
+
+# Library cleaning and preprocessing data
+import pandas as pd
+import numpy as np
+import datetime as dt
+
+# Library for visualisation
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Library to ignore future warning 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+# Import data
+df_payment = pd.read_sql_query (
+"""
+SELECT *
+FROM olist_order_payments_dataset;
+"""
+, conn)
+
+# Set index
+df_payment.set_index('index', inplace = True)
+
+# Show the first 5 row in the table
+df_payment.head()
+
+
+# Merge all tables into one dataframe
+df_olist = pd.merge(df_order, df_item, on='order_id', how='left')
+df_olist = pd.merge(df_olist, df_product, on='product_id', how='inner')
+df_olist = pd.merge(df_olist, df_payment, on='order_id', how = 'left')
+df_olist = pd.merge(df_olist, df_review, on='order_id', how='left')
+df_olist = pd.merge(df_olist, df_customer, on='customer_id', how='right')
+df_olist = pd.merge(df_olist, df_translate, on='product_category_name', how='inner')
+
+# Dataset dimension
+row, col = df_olist.shape
+
+print(f"Total columns: {col}")
+print(f"Total rows: {row}")
+
+# Dataset info
+df_olist.info()
+
+# Drop columns that not necessary in analysis
+df_olist_filtered = df_olist.drop(columns=['shipping_limit_date','product_category_name', 'product_name_lenght', 
+                                           'product_description_lenght', 'order_delivered_carrier_date',
+                                           'product_weight_g', 'product_length_cm', 'product_height_cm', 
+                                           'product_width_cm','payment_installments', 'order_delivered_customer_date', 
+                                           'review_id', 'review_comment_title', 'review_comment_message', 
+                                           'review_creation_date', 'review_answer_timestamp', 'customer_id', 
+                                           'order_approved_at', 'order_item_id']) 
+
+  
+# sum all missing value in dataset and keep only columns with missing value > 0
+nan_col = df_olist_filtered.isnull().sum()[df_olist_filtered.isnull().sum() > 0]
+
+# construct a dataframe consists of NaN count and NaN percentage
+nan_col_olist = pd.DataFrame({'NaN_count': nan_col, 'NaN_percentage': nan_col / 
+                              len(df_olist_filtered) * 100}).sort_values(by = 'NaN_percentage', ascending = False)
+
+# missing value information
+nan_col_olist
+
+# Drop the row with missing value
+df_olist_filtered.dropna(subset=['payment_type'], inplace = True)
+
+# Find mode in review_score columns
+rev_score_mode = df_olist_filtered['review_score'].mode()[0]
+
+# input missing value host_response_time dengan modus
+df_olist_filtered['review_score'].fillna(rev_score_mode, inplace=True)
+
+# Check missing value again
+df_olist_filtered.isna().sum()
+
+# Dataset info
+df_olist_filtered.info()
+
+
+
+# Convert to date and time data type
+df_olist_filtered['order_purchase_timestamp'] = pd.to_datetime(df_olist_filtered['order_purchase_timestamp'], yearfirst=True)
+
+# Extract date and time from order_purchase_timestamp
+df_olist_filtered['year'] = df_olist_filtered['order_purchase_timestamp'].dt.year
+df_olist_filtered['month'] = df_olist_filtered['order_purchase_timestamp'].dt.month
+df_olist_filtered['date'] = df_olist_filtered['order_purchase_timestamp'].dt.day
+
+# Convert data type from specific columns using dict
+convert_type = {'product_photos_qty': int,
+                'payment_sequential' : int, 
+                'review_score' : int, 
+                'customer_zip_code_prefix' : str
+                }
+
+# Apply transforming data
+df_olist_filtered = df_olist_filtered.astype(convert_type)
+
+
+
+# Check total duplicated values
+df_olist_filtered.duplicated().sum()
+
+# Check duplicate values data to find why the duplicate values happen
+df_olist_filtered[df_olist_filtered.duplicated()].sort_values('order_purchase_timestamp')
+
+# Drop duplicated values
+df_olist_filtered.drop_duplicates(inplace=True)
+
+
+# Check inconsitent value for each categorical data
+cat_col = ['order_status', 'payment_type', 'customer_city', 'customer_state', 'product_category_name_english']
+
+# Looping for unique values on each category
+for i in cat_col:
+  print(f"Unique Value from {i}:")
+  print(sorted(df_olist_filtered[i].unique()))
+  print('\n')
+
+
+# Function to change the unique value of product_category_name_english
+def format_val(x):
+  if x == 'home_appliances_2':
+    return 'home_appliances'
+  elif x == 'home_confort':
+    return 'home_comfort'
+  elif x == 'home_comfort_2':
+    return 'home_comfort'
+  return x
+
+# Apply the function
+df_olist_filtered['product_category_name_english'] = df_olist_filtered['product_category_name_english'].apply(format_val)
+
+
+# List of numeric columns
+num_col = ['price', 'freight_value', 'product_photos_qty', 'payment_sequential', 'payment_value', 'review_score']
+
+# Create subplots with 3x2 grids and size 18x8
+fig, ax = plt.subplots(2, 3, figsize=(18,8))
+
+cnt = 0
+
+# Loop through the grids
+for i in range(2):
+
+    if cnt >= 7:
+            break
+
+    for j in range(3):
+
+        if cnt >= 7:
+            break
+        
+        # We use boxplot from pyplot
+        ax[i, j].boxplot(df_olist_filtered[num_col[cnt]], vert=False)
+        ax[i, j].set_title(str(num_col[cnt]), fontdict={'fontsize':12})
+
+        # Increment counter
+        cnt = cnt+1
+
+# Make sure layout is not overlapping
+fig.tight_layout()
+# Show the graphs
+fig.show()
+
+
+
+#Import method copy
+import copy
+
+# Copy original dataset
+df_olist_capped = copy.deepcopy(df_olist_filtered)
+
+# Function to filter outlier
+def capping_outlier(col):
+    
+    # Define upper limit and lower limit
+    lwr_limit = df_olist_capped[col].quantile(0.03)
+    upr_limit = df_olist_capped[col].quantile(0.97)
+
+    print(str(col).upper())
+    print("lwr:", lwr_limit, "upr:", upr_limit)
+    print()
+    
+    # Filter outlier
+    df_olist_capped[col] = np.where(df_olist_capped[col]> upr_limit, upr_limit, 
+                                    np.where(df_olist_capped[col]< lwr_limit, lwr_limit, df_olist_capped[col]))
+
+# List of column with outlier
+outlier_col = ['price', 'freight_value', 'payment_value', 'product_photos_qty']
+
+# Loop to apply the function for filtering outlier
+for col in outlier_col:
+    capping_outlier(col)
+
+# Copy dataset after preprocessing and cleaning
+df_olist_clean = copy.deepcopy(df_olist_capped)
+df_olist_clean.head()
+
+
+
+# Add new column for month-year
+df_olist_clean['month_year'] = df_olist_clean['order_purchase_timestamp'].dt.strftime('%Y-%m')
+
+# Group by order
+order_per_month = df_olist_clean.groupby(['month_year']).count()[['order_id']]
+
+# Exclude last month because only 1 records found
+order_per_month = order_per_month.iloc[:-1]
+
+# Visualization
+fig, ax = plt.subplots(figsize=(20, 8))
+ax = sns.lineplot(data=order_per_month, marker='o', markersize=5, color='green', label='Total Order')
+ax.set_title('Total Order by Month', fontsize=18)
+ax.set_xlabel('Month-Year', fontsize=12)
+ax.set_ylabel('Total Order', fontsize=12)
+ax.get_legend().remove()
+fig.show()
+
+
+# Group by top 10 products category by Total Order and Total Monetary
+products_by_order = df_olist_clean.groupby('product_category_name_english').count()[['order_id']].sort_values(by='order_id', ascending=False).reset_index()[:10]
+product_by_payment_value = df_olist_clean.groupby('product_category_name_english').sum()[['payment_value']].sort_values(by='payment_value', ascending=False).reset_index()[:10]
+
+# Create subplots with 2x1 grids and size 20x7
+fig, ax = plt.subplots(1, 2, figsize=(20,7))
+
+# Plot barplot [0]
+sns.barplot(data=products_by_order, x='order_id', y='product_category_name_english', palette='YlGn_r', ax=ax[0])
+ax[0].set_title("Top 10 Products Category by Orders", fontdict={'fontsize':12})
+ax[0].set_xlabel("Total Order", fontdict={'fontsize':10})
+ax[0].set_ylabel("Product Category", fontdict={'fontsize':10})
+
+# Plot barplot [1]
+sns.barplot(data=product_by_payment_value, x='payment_value', y='product_category_name_english', palette='YlGn_r', ax=ax[1])
+ax[1].set_title("Top 10 Products Category by Monetary", fontdict={'fontsize':12})
+ax[1].set_xlabel("Total Monetary", fontdict={'fontsize':10})
+ax[1].set_ylabel("Product Category", fontdict={'fontsize':10})
+
+# Make sure layout is not overlapping
+fig.tight_layout()
+
+# Show the graphs
+fig.show()
+
+
+
+# Create subplots with 1x2 grids and size 20x7
+fig, ax = plt.subplots(1, 2, figsize=(20,7))
+
+# Plot boxplot [0]
+sns.boxplot(data=df_olist_clean, y="payment_value", x="payment_type", ax=ax[0])
+ax[0].set_title('Distribution of Payment Method by Payment Value', fontsize=18)
+ax[0].set_xlabel('Payment Value',  fontdict={'fontsize':10})
+ax[0].set_ylabel('Payment Method', fontdict={'fontsize':10})
+
+# Plot countplot [0]
+sns.countplot(data=df_olist_clean, x="payment_type", ax=ax[1])
+ax[1].set_title('Total Order by Payment Method', fontsize=18)
+ax[1].set_xlabel('Month-Year',  fontdict={'fontsize':10})
+ax[1].set_ylabel('Total Order',  fontdict={'fontsize':10})
+
+# Make sure layout is not overlapping
+fig.tight_layout()
+
+# Show the graphs
+fig.show()
+
+
+
+# Create subplots size 10,6
+fig, ax = plt.subplots(figsize=(10,6))
+
+# Plot countplot
+sns.countplot(data=df_olist_clean, x="review_score", ax=ax)
+ax.set_title('Review Score Distribution', fontsize=18)
+ax.set_xlabel('Payment Value',  fontdict={'fontsize':10})
+ax.set_ylabel('Payment Method', fontdict={'fontsize':10})
+
+# Make sure layout is not overlapping
+fig.tight_layout()
+
+# Show the graphs
+fig.show()
+
+
+
+
